@@ -2,8 +2,10 @@ import hashlib
 import json
 import os
 import socket
-import sqlite3
 import threading
+
+import psycopg
+from psycopg.rows import dict_row
 
 
 HOST = "localhost"
@@ -11,14 +13,42 @@ PUERTO = 9001
 BUFFER_SIZE = 4096
 MAX_MENSAJE = 1024 * 1024
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "votacion.db")
+
+
+def cargar_env():
+    ruta_env = os.path.join(BASE_DIR, ".env")
+    if not os.path.exists(ruta_env):
+        return
+
+    with open(ruta_env, "r", encoding="utf-8") as archivo:
+        for linea in archivo:
+            linea = linea.strip()
+            if not linea or linea.startswith("#") or "=" not in linea:
+                continue
+            clave, valor = linea.split("=", 1)
+            clave = clave.strip()
+            valor = valor.strip().strip('"').strip("'")
+            os.environ.setdefault(clave, valor)
+
+
+cargar_env()
+
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "votacion_db")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
 
 
 def conectar_db():
-    conexion = sqlite3.connect(DB_PATH)
-    conexion.row_factory = sqlite3.Row
-    conexion.execute("PRAGMA foreign_keys = ON")
-    return conexion
+    return psycopg.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        row_factory=dict_row,
+    )
 
 
 def respuesta_ok(mensaje="Operación realizada correctamente", **datos):
@@ -27,7 +57,7 @@ def respuesta_ok(mensaje="Operación realizada correctamente", **datos):
     return respuesta
 
 
-def respuesta_error(mensaje="Error interno del servidor", **datos):
+def respuesta_error(mensaje="Error interno del servidor de datos.", **datos):
     respuesta = {"estado": "error", "mensaje": mensaje}
     respuesta.update(datos)
     return respuesta
@@ -66,142 +96,126 @@ def generar_hash_voto(usuario_id, opcion_id, fecha_hora):
     return hashlib.sha256(contenido.encode("utf-8")).hexdigest()
 
 
-def obtener_usuario(solicitud):
-    codigo = solicitud.get("codigo")
-    if not codigo:
-        return respuesta_error("Debe enviar el código del alumno")
+def normalizar_fecha_hora(fecha_hora):
+    if hasattr(fecha_hora, "isoformat"):
+        return fecha_hora.isoformat(timespec="seconds")
+    return str(fecha_hora)
 
-    conexion = conectar_db()
-    try:
-        cursor = conexion.execute(
+
+def obtener_usuario(codigo):
+    with conectar_db() as conexion:
+        fila = conexion.execute(
             """
             SELECT id, codigo, nombre, password, ha_votado
             FROM usuarios
-            WHERE codigo = ?
+            WHERE codigo = %s
             """,
             (codigo,),
-        )
-        fila = cursor.fetchone()
-    finally:
-        conexion.close()
+        ).fetchone()
 
     if fila is None:
-        return respuesta_error("Usuario no encontrado")
+        return None
 
-    return respuesta_ok(
-        "Usuario encontrado",
-        usuario={
-            "id": fila["id"],
-            "codigo": fila["codigo"],
-            "nombre": fila["nombre"],
-            "password": fila["password"],
-            "ha_votado": fila["ha_votado"],
-        },
-    )
+    return {
+        "id": fila["id"],
+        "codigo": fila["codigo"],
+        "nombre": fila["nombre"],
+        "password": fila["password"],
+        "ha_votado": fila["ha_votado"],
+    }
 
 
-def listar_opciones(_solicitud):
-    conexion = conectar_db()
-    try:
-        cursor = conexion.execute("SELECT id, nombre FROM opciones ORDER BY id")
-        opciones = [{"id": fila["id"], "nombre": fila["nombre"]} for fila in cursor.fetchall()]
-    finally:
-        conexion.close()
-
-    return respuesta_ok("Opciones consultadas correctamente", opciones=opciones)
+def listar_opciones():
+    with conectar_db() as conexion:
+        filas = conexion.execute(
+            "SELECT id, nombre FROM opciones ORDER BY id"
+        ).fetchall()
+    return [{"id": fila["id"], "nombre": fila["nombre"]} for fila in filas]
 
 
-def verificar_voto_usuario(solicitud):
-    usuario_id = solicitud.get("usuario_id")
-    if not usuario_id:
-        return respuesta_error("Debe enviar el id del usuario")
+def existe_opcion(opcion_id):
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            "SELECT id FROM opciones WHERE id = %s",
+            (opcion_id,),
+        ).fetchone()
+    return fila is not None
 
-    conexion = conectar_db()
-    try:
-        cursor = conexion.execute(
+
+def usuario_ya_voto(usuario_id):
+    with conectar_db() as conexion:
+        fila = conexion.execute(
             """
             SELECT u.ha_votado, v.id AS voto_id
             FROM usuarios u
             LEFT JOIN votos v ON v.usuario_id = u.id
-            WHERE u.id = ?
+            WHERE u.id = %s
             """,
             (usuario_id,),
-        )
-        fila = cursor.fetchone()
-    finally:
-        conexion.close()
+        ).fetchone()
 
     if fila is None:
-        return respuesta_error("Usuario no encontrado")
+        return None
 
-    ya_voto = fila["ha_votado"] == 1 or fila["voto_id"] is not None
-    return respuesta_ok("Estado de voto consultado", ya_voto=ya_voto)
-
-
-def verificar_opcion_existe(conexion, opcion_id):
-    cursor = conexion.execute("SELECT id FROM opciones WHERE id = ?", (opcion_id,))
-    return cursor.fetchone() is not None
+    return bool(fila["ha_votado"] or fila["voto_id"] is not None)
 
 
-def registrar_voto(solicitud):
-    usuario_id = solicitud.get("usuario_id")
-    opcion_id = solicitud.get("opcion_id")
-    fecha_hora = solicitud.get("fecha_hora")
-    hash_voto = solicitud.get("hash_voto")
+def registrar_voto(usuario_id, opcion_id, fecha_hora, hash_voto):
+    if len(hash_voto) != 64:
+        return respuesta_error("El hash del voto no es válido")
 
-    if not usuario_id or not opcion_id or not fecha_hora or not hash_voto:
-        return respuesta_error("Datos incompletos para registrar el voto")
+    hash_esperado = generar_hash_voto(usuario_id, opcion_id, fecha_hora)
+    if hash_voto != hash_esperado:
+        return respuesta_error("El hash del voto no coincide con los datos recibidos")
 
+    conexion = conectar_db()
     try:
-        conexion = conectar_db()
-        try:
-            cursor = conexion.execute(
-                "SELECT id, ha_votado FROM usuarios WHERE id = ?",
+        with conexion.transaction():
+            usuario = conexion.execute(
+                "SELECT id, ha_votado FROM usuarios WHERE id = %s FOR UPDATE",
                 (usuario_id,),
-            )
-            usuario = cursor.fetchone()
+            ).fetchone()
             if usuario is None:
-                return respuesta_error("Usuario no encontrado")
+                return respuesta_error("Usuario no encontrado.")
 
-            if not verificar_opcion_existe(conexion, opcion_id):
-                return respuesta_error("La opción seleccionada no existe")
+            opcion = conexion.execute(
+                "SELECT id FROM opciones WHERE id = %s",
+                (opcion_id,),
+            ).fetchone()
+            if opcion is None:
+                return respuesta_error("La opción seleccionada no existe.")
 
-            cursor = conexion.execute(
-                "SELECT id FROM votos WHERE usuario_id = ?",
+            voto_existente = conexion.execute(
+                "SELECT id FROM votos WHERE usuario_id = %s",
                 (usuario_id,),
-            )
-            voto_existente = cursor.fetchone()
-            if usuario["ha_votado"] == 1 or voto_existente is not None:
+            ).fetchone()
+            if usuario["ha_votado"] or voto_existente is not None:
                 return respuesta_error("El alumno ya emitió su voto. No puede votar dos veces.")
-
-            hash_esperado = generar_hash_voto(usuario_id, opcion_id, fecha_hora)
-            if hash_voto != hash_esperado:
-                return respuesta_error("El hash del voto no coincide con los datos recibidos")
 
             conexion.execute(
                 """
                 INSERT INTO votos (usuario_id, opcion_id, fecha_hora, hash_voto)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 """,
                 (usuario_id, opcion_id, fecha_hora, hash_voto),
             )
             conexion.execute(
-                "UPDATE usuarios SET ha_votado = 1 WHERE id = ?",
+                "UPDATE usuarios SET ha_votado = TRUE WHERE id = %s",
                 (usuario_id,),
             )
-            conexion.commit()
-        finally:
-            conexion.close()
-
-        return respuesta_ok("Voto registrado correctamente")
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
         return respuesta_error("El alumno ya emitió su voto. No puede votar dos veces.")
+    except Exception:
+        raise
+    finally:
+        conexion.close()
+
+    return respuesta_ok("Voto registrado correctamente")
 
 
-def obtener_resultados(_solicitud):
-    conexion = conectar_db()
-    try:
-        cursor = conexion.execute(
+def obtener_resultados():
+    with conectar_db() as conexion:
+        filas = conexion.execute(
             """
             SELECT o.nombre AS opcion, COUNT(v.id) AS votos
             FROM opciones o
@@ -209,35 +223,27 @@ def obtener_resultados(_solicitud):
             GROUP BY o.id, o.nombre
             ORDER BY o.id
             """
-        )
-        resultados = [
-            {"opcion": fila["opcion"], "votos": fila["votos"]}
-            for fila in cursor.fetchall()
-        ]
-    finally:
-        conexion.close()
-
-    return respuesta_ok("Resultados consultados correctamente", resultados=resultados)
+        ).fetchall()
+    return [{"opcion": fila["opcion"], "votos": fila["votos"]} for fila in filas]
 
 
-def verificar_integridad(_solicitud):
+def verificar_integridad():
     votos_alterados = []
 
-    conexion = conectar_db()
-    try:
-        cursor = conexion.execute(
+    with conectar_db() as conexion:
+        filas = conexion.execute(
             "SELECT id, usuario_id, opcion_id, fecha_hora, hash_voto FROM votos ORDER BY id"
+        ).fetchall()
+
+    for fila in filas:
+        fecha_hora = normalizar_fecha_hora(fila["fecha_hora"])
+        hash_calculado = generar_hash_voto(
+            fila["usuario_id"],
+            fila["opcion_id"],
+            fecha_hora,
         )
-        for fila in cursor.fetchall():
-            hash_calculado = generar_hash_voto(
-                fila["usuario_id"],
-                fila["opcion_id"],
-                fila["fecha_hora"],
-            )
-            if hash_calculado != fila["hash_voto"]:
-                votos_alterados.append(fila["id"])
-    finally:
-        conexion.close()
+        if hash_calculado != fila["hash_voto"]:
+            votos_alterados.append(fila["id"])
 
     if votos_alterados:
         return respuesta_error(
@@ -248,13 +254,57 @@ def verificar_integridad(_solicitud):
     return respuesta_ok("Todos los votos mantienen su integridad")
 
 
+def accion_obtener_usuario(solicitud):
+    codigo = solicitud.get("codigo")
+    if not codigo:
+        return respuesta_error("Debe enviar el código del alumno")
+
+    usuario = obtener_usuario(codigo)
+    if usuario is None:
+        return respuesta_error("Usuario no encontrado.")
+
+    return respuesta_ok("Usuario encontrado", usuario=usuario)
+
+
+def accion_listar_opciones(_solicitud):
+    return respuesta_ok("Opciones consultadas correctamente", opciones=listar_opciones())
+
+
+def accion_verificar_voto_usuario(solicitud):
+    usuario_id = solicitud.get("usuario_id")
+    if not usuario_id:
+        return respuesta_error("Debe enviar el id del usuario")
+
+    ya_voto = usuario_ya_voto(usuario_id)
+    if ya_voto is None:
+        return respuesta_error("Usuario no encontrado.")
+
+    return respuesta_ok("Estado de voto consultado", ya_voto=ya_voto)
+
+
+def accion_registrar_voto(solicitud):
+    usuario_id = solicitud.get("usuario_id")
+    opcion_id = solicitud.get("opcion_id")
+    fecha_hora = solicitud.get("fecha_hora")
+    hash_voto = solicitud.get("hash_voto")
+
+    if not usuario_id or not opcion_id or not fecha_hora or not hash_voto:
+        return respuesta_error("Datos incompletos para registrar el voto")
+
+    return registrar_voto(usuario_id, opcion_id, fecha_hora, hash_voto)
+
+
+def accion_obtener_resultados(_solicitud):
+    return respuesta_ok("Resultados consultados correctamente", resultados=obtener_resultados())
+
+
 ACCIONES = {
-    "obtener_usuario": obtener_usuario,
-    "listar_opciones": listar_opciones,
-    "verificar_voto_usuario": verificar_voto_usuario,
-    "registrar_voto": registrar_voto,
-    "obtener_resultados": obtener_resultados,
-    "verificar_integridad": verificar_integridad,
+    "obtener_usuario": accion_obtener_usuario,
+    "listar_opciones": accion_listar_opciones,
+    "verificar_voto_usuario": accion_verificar_voto_usuario,
+    "registrar_voto": accion_registrar_voto,
+    "obtener_resultados": accion_obtener_resultados,
+    "verificar_integridad": lambda _solicitud: verificar_integridad(),
 }
 
 
@@ -265,9 +315,14 @@ def procesar_solicitud(solicitud):
 
     manejador = ACCIONES.get(accion)
     if manejador is None:
-        return respuesta_error("Acción no reconocida")
+        return respuesta_error("Acción no reconocida.")
 
-    return manejador(solicitud)
+    try:
+        return manejador(solicitud)
+    except (psycopg.OperationalError, psycopg.InterfaceError):
+        return respuesta_error("No se pudo conectar a PostgreSQL.")
+    except Exception:
+        return respuesta_error("Error interno del servidor de datos.")
 
 
 def manejar_cliente(conexion, direccion):
@@ -279,7 +334,7 @@ def manejar_cliente(conexion, direccion):
         enviar_json(conexion, respuesta_error("JSON inválido"))
     except Exception:
         try:
-            enviar_json(conexion, respuesta_error("Error interno del servidor"))
+            enviar_json(conexion, respuesta_error("Error interno del servidor de datos."))
         except Exception:
             pass
     finally:
@@ -287,15 +342,12 @@ def manejar_cliente(conexion, direccion):
 
 
 def iniciar_servidor():
-    if not os.path.exists(DB_PATH):
-        print("No existe votacion.db. Ejecute primero: python init_db.py")
-        return
-
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     servidor.bind((HOST, PUERTO))
     servidor.listen()
     print(f"Servidor de datos escuchando en {HOST}:{PUERTO}")
+    print(f"Base de datos PostgreSQL: {DB_NAME} en {DB_HOST}:{DB_PORT}")
 
     try:
         while True:

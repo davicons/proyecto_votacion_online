@@ -219,7 +219,7 @@ Ejemplo interno para registrar voto:
 
 1. `presentacion.py` solicita login a `logica.py` por TCP/JSON.
 2. `logica.py` solicita el usuario a `datos.py`.
-3. `datos.py` consulta SQLite y responde a `logica.py`.
+3. `datos.py` consulta PostgreSQL y responde a `logica.py`.
 4. `logica.py` valida contraseña y responde a `presentacion.py`.
 5. Para votar, `presentacion.py` envía `usuario_id` y `opcion_id` a `logica.py`.
 6. `logica.py` verifica opción, doble voto, fecha y hash.

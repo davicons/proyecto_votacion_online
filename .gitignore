@@ -1,0 +1,35 @@
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Variables de entorno locales
+.env
+!.env.example
+
+# Cache y archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Bases de datos locales heredadas o de prueba
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite-journal
+
+# Logs y archivos temporales
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Configuracion local de editores
+.vscode/
+.idea/
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
