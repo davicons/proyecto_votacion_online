@@ -63,6 +63,7 @@ datos.py
 
 ```text
 sistema_votacion_tcp/
+├── manage.py
 ├── presentacion.py
 ├── logica.py
 ├── datos.py
@@ -75,6 +76,7 @@ sistema_votacion_tcp/
 
 ## Explicacion de archivos
 
+- `manage.py`: comando auxiliar para inicializar la base y ejecutar las capas en orden sin cambiar la arquitectura del sistema.
 - `presentacion.py`: interfaz grafica de escritorio. Permite login, menu, votacion, resultados e integridad. Solo se conecta con `logica.py`.
 - `logica.py`: servidor TCP en `localhost:9000`. Aplica reglas de negocio, verifica credenciales, evita doble voto y genera el hash SHA-256.
 - `datos.py`: servidor TCP en `localhost:9001`. Es la unica capa que accede a PostgreSQL.
@@ -177,14 +179,36 @@ pip install -r requirements.txt
 Primero cree la base `votacion_db` en PostgreSQL. Luego ejecute:
 
 ```bash
-python init_db_postgres.py
+py manage.py initdb
 ```
 
-El script crea las tablas necesarias e inserta los datos de prueba sin duplicarlos si se ejecuta mas de una vez.
+Tambien se acepta el alias:
+
+```bash
+py manage.py init_db
+```
+
+El script crea las tablas necesarias e inserta los datos de prueba sin duplicarlos si se ejecuta mas de una vez. Si la base ya estaba inicializada, muestra un mensaje de validacion con la cantidad de usuarios, opciones y votos registrados.
 
 ## Ejecucion
 
-Ejecutar en este orden, desde la carpeta del proyecto:
+Forma recomendada:
+
+```bash
+py manage.py runserver
+```
+
+Este comando inicia `datos.py`, espera que escuche en `localhost:9001`, inicia `logica.py`, espera que escuche en `localhost:9000` y luego abre `presentacion.py`. Al cerrar la ventana de presentacion, detiene automaticamente las capas de logica y datos.
+
+Tambien puede ejecutar cada capa de forma individual con `manage.py`:
+
+```bash
+py manage.py datos
+py manage.py logica
+py manage.py presentacion
+```
+
+Ejecucion manual equivalente:
 
 ```bash
 python datos.py
@@ -192,7 +216,7 @@ python logica.py
 python presentacion.py
 ```
 
-Se recomienda abrir una terminal distinta para `datos.py`, `logica.py` y `presentacion.py`.
+En modo manual se recomienda abrir una terminal distinta para `datos.py`, `logica.py` y `presentacion.py`.
 
 ## Protocolo TCP + JSON
 
@@ -257,9 +281,9 @@ La integridad contra doble voto se protege en tres niveles:
 
 ## Casos de prueba
 
-1. Ejecutar `python init_db_postgres.py` y verificar que se creen las tablas.
-2. Iniciar `datos.py` y confirmar que escuche en `localhost:9001`.
-3. Iniciar `logica.py` y confirmar que escuche en `localhost:9000`.
+1. Ejecutar `py manage.py initdb` y verificar que se creen las tablas.
+2. Ejecutar `py manage.py runserver`.
+3. Confirmar que `datos.py` escuche en `localhost:9001` y `logica.py` en `localhost:9000`.
 4. Iniciar sesion con `A001` y contrasena `123456`.
 5. Consultar opciones disponibles.
 6. Votar por una opcion valida.

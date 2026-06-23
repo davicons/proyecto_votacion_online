@@ -42,6 +42,8 @@ OPCIONES_PRUEBA = [
     "Lista C",
 ]
 
+TABLAS_REQUERIDAS = ("usuarios", "opciones", "votos")
+
 
 def conectar_db():
     return psycopg.connect(
@@ -88,6 +90,42 @@ def crear_tablas(conexion):
     )
 
 
+def obtener_tablas_existentes(conexion):
+    filas = conexion.execute(
+        """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name IN ('usuarios', 'opciones', 'votos')
+        """
+    ).fetchall()
+    return {fila[0] for fila in filas}
+
+
+def contar_registros(conexion, tabla):
+    if tabla not in TABLAS_REQUERIDAS:
+        raise ValueError("Tabla no permitida")
+
+    fila = conexion.execute(f"SELECT COUNT(*) FROM {tabla}").fetchone()
+    return fila[0]
+
+
+def obtener_estado(conexion):
+    tablas = obtener_tablas_existentes(conexion)
+    conteos = {}
+
+    for tabla in TABLAS_REQUERIDAS:
+        conteos[tabla] = contar_registros(conexion, tabla) if tabla in tablas else 0
+
+    return {
+        "tablas": tablas,
+        "conteos": conteos,
+        "inicializada": set(TABLAS_REQUERIDAS).issubset(tablas)
+        and conteos["usuarios"] >= len(USUARIOS_PRUEBA)
+        and conteos["opciones"] >= len(OPCIONES_PRUEBA),
+    }
+
+
 def insertar_datos_prueba(conexion):
     cursor = conexion.cursor()
 
@@ -112,15 +150,33 @@ def insertar_datos_prueba(conexion):
 
 def inicializar_base_datos():
     with conectar_db() as conexion:
+        estado_antes = obtener_estado(conexion)
         crear_tablas(conexion)
         insertar_datos_prueba(conexion)
+        estado_despues = obtener_estado(conexion)
+
+    return {
+        "ya_estaba_inicializada": estado_antes["inicializada"],
+        "estado": estado_despues,
+    }
 
 
 if __name__ == "__main__":
     try:
-        inicializar_base_datos()
-        print("Base de datos PostgreSQL inicializada correctamente.")
+        resultado = inicializar_base_datos()
+        if resultado["ya_estaba_inicializada"]:
+            print("La base de datos PostgreSQL ya estaba inicializada.")
+        else:
+            print("Base de datos PostgreSQL inicializada correctamente.")
+
+        conteos = resultado["estado"]["conteos"]
         print(f"Base de datos: {DB_NAME} en {DB_HOST}:{DB_PORT}")
+        print(
+            "Validacion: "
+            f"usuarios={conteos['usuarios']}, "
+            f"opciones={conteos['opciones']}, "
+            f"votos={conteos['votos']}"
+        )
     except psycopg.OperationalError:
         print("No se pudo conectar a PostgreSQL.")
         print("Verifique que PostgreSQL esté activo y que exista la base de datos votacion_db.")
