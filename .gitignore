@@ -25,6 +25,10 @@ __pycache__/
 *.bak
 *.swp
 
+# Node.js
+node_modules/
+npm-debug.log*
+
 # Configuracion local de editores
 .vscode/
 .idea/

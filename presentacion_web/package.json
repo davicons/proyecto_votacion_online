@@ -1,0 +1,12 @@
+{
+  "name": "presentacion-web-votacion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Capa de presentacion web para el sistema de votacion online.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

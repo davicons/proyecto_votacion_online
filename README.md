@@ -218,6 +218,35 @@ python presentacion.py
 
 En modo manual se recomienda abrir una terminal distinta para `datos.py`, `logica.py` y `presentacion.py`.
 
+## Presentacion web opcional
+
+Ademas de la interfaz de escritorio `presentacion.py`, el proyecto incluye una capa de presentacion web en `presentacion_web/`. Esta interfaz usa Node.js como puente HTTP y mantiene el mismo protocolo TCP + JSON hacia `logica.py`.
+
+```text
+[ Navegador + TailwindCSS ]
+        ↓ HTTP
+[ Node.js: presentacion_web/server.js ]
+        ↓ TCP + JSON localhost:9000
+[ logica.py ]
+        ↓ TCP + JSON localhost:9001
+[ datos.py ]
+```
+
+Para usarla, primero ejecute `datos.py` y `logica.py`. Luego, en otra terminal:
+
+```bash
+cd presentacion_web
+npm start
+```
+
+Abra en el navegador:
+
+```text
+http://localhost:3000
+```
+
+La interfaz web implementa las mismas acciones: login, listar opciones, votar, resultados y verificacion de integridad.
+
 ## Protocolo TCP + JSON
 
 Todas las comunicaciones usan JSON terminado en salto de linea `\n`. Esto evita problemas de lectura parcial en sockets TCP.
