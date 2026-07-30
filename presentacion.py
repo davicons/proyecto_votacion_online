@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 
-HOST_LOGICA = "localhost"
+HOST_LOGICA = "94.72.114.205"
 PUERTO_LOGICA = 9000
 BUFFER_SIZE = 4096
 MAX_MENSAJE = 1024 * 1024

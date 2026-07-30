@@ -47,13 +47,13 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            cd /root/votacion
+            cd /root/votacionOnline
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt --quiet
-            pkill -f "python3 /root/votacion/datos.py" || true
-            pkill -f "python3 /root/votacion/logica.py" || true
+            pkill -f "python3 /root/votacionOnline/datos.py" || true
+            pkill -f "python3 /root/votacionOnline/logica.py" || true
             sleep 2
-            nohup python3 /root/votacion/datos.py > /root/votacion/datos.log 2>&1 &
-            nohup python3 /root/votacion/logica.py > /root/votacion/logica.log 2>&1 &
+            nohup python3 /root/votacionOnline/datos.py > /root/votacionOnline/datos.log 2>&1 &
+            nohup python3 /root/votacionOnline/logica.py > /root/votacionOnline/logica.log 2>&1 &
             echo "Deploy completado"
