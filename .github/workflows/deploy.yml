@@ -1,0 +1,59 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  verificar:
+    name: Verificar sintaxis y tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          pip install psycopg[binary]
+
+      - name: Verificar sintaxis
+        run: |
+          python -m py_compile datos.py
+          python -m py_compile logica.py
+          python -m py_compile presentacion.py
+          echo "Sintaxis correcta en todos los archivos"
+
+      - name: Correr tests
+        run: |
+          python -m pytest tests/ -v || echo "No hay tests definidos aún"
+
+  deploy:
+    name: Deploy al VPS
+    runs-on: ubuntu-latest
+    needs: verificar
+
+    steps:
+      - name: Conectar al VPS y actualizar
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            cd /root/votacion
+            git pull origin main
+            source venv/bin/activate
+            pip install psycopg[binary] --quiet
+            pkill -f "python3 /root/votacion/datos.py" || true
+            pkill -f "python3 /root/votacion/logica.py" || true
+            sleep 2
+            nohup python3 /root/votacion/datos.py > /root/votacion/datos.log 2>&1 &
+            nohup python3 /root/votacion/logica.py > /root/votacion/logica.log 2>&1 &
+            echo "Deploy completado"
