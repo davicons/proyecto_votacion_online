@@ -21,7 +21,7 @@ jobs:
 
       - name: Instalar dependencias
         run: |
-          pip install psycopg[binary]
+          pip install -r requirements.txt
 
       - name: Verificar sintaxis
         run: |
@@ -32,7 +32,7 @@ jobs:
 
       - name: Correr tests
         run: |
-          python -m pytest tests/ -v || echo "No hay tests definidos aún"
+          python -m pytest tests/ -v
 
   deploy:
     name: Deploy al VPS
@@ -50,7 +50,7 @@ jobs:
             cd /root/votacion
             git pull origin main
             source venv/bin/activate
-            pip install psycopg[binary] --quiet
+            pip install -r requirements.txt --quiet
             pkill -f "python3 /root/votacion/datos.py" || true
             pkill -f "python3 /root/votacion/logica.py" || true
             sleep 2
