@@ -55,5 +55,7 @@ jobs:
             pkill -f "python3 /root/votacionOnline/logica.py" || true
             sleep 2
             nohup python3 /root/votacionOnline/datos.py > /root/votacionOnline/datos.log 2>&1 &
+            disown $!
             nohup python3 /root/votacionOnline/logica.py > /root/votacionOnline/logica.log 2>&1 &
+            disown $!
             echo "Deploy completado"
