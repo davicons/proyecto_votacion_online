@@ -47,13 +47,27 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            cd /root/votacionOnline
-            git pull origin main
-            source venv/bin/activate
+            apt-get install -y git python3 python3-venv python3-full --quiet
+
+            if [ -d "/root/votacionOnline/.git" ]; then
+              cd /root/votacionOnline
+              git pull origin main
+            else
+              git clone https://github.com/davicons/proyecto_votacion_online.git /root/votacionOnline
+              cd /root/votacionOnline
+            fi
+
+            if [ ! -d "/root/votacionOnline/venv" ]; then
+              python3 -m venv /root/votacionOnline/venv
+            fi
+
+            source /root/votacionOnline/venv/bin/activate
             pip install -r requirements.txt --quiet
+
             pkill -f "python3 /root/votacionOnline/datos.py" || true
             pkill -f "python3 /root/votacionOnline/logica.py" || true
             sleep 2
+
             nohup python3 /root/votacionOnline/datos.py > /root/votacionOnline/datos.log 2>&1 &
             disown $!
             nohup python3 /root/votacionOnline/logica.py > /root/votacionOnline/logica.log 2>&1 &
