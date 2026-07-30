@@ -61,15 +61,39 @@ jobs:
               python3 -m venv /root/votacionOnline/venv
             fi
 
-            source /root/votacionOnline/venv/bin/activate
-            pip install -r requirements.txt --quiet
+            /root/votacionOnline/venv/bin/pip install -r /root/votacionOnline/requirements.txt --quiet
 
-            pkill -f "python3 /root/votacionOnline/datos.py" || true
-            pkill -f "python3 /root/votacionOnline/logica.py" || true
-            sleep 2
+            cat > /etc/systemd/system/votacion-datos.service << 'EOF'
+            [Unit]
+            Description=Servidor de datos votacion
+            After=network.target postgresql.service
 
-            nohup python3 /root/votacionOnline/datos.py > /root/votacionOnline/datos.log 2>&1 &
-            disown $!
-            nohup python3 /root/votacionOnline/logica.py > /root/votacionOnline/logica.log 2>&1 &
-            disown $!
+            [Service]
+            ExecStart=/root/votacionOnline/venv/bin/python3 /root/votacionOnline/datos.py
+            WorkingDirectory=/root/votacionOnline
+            Restart=always
+            RestartSec=3
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            cat > /etc/systemd/system/votacion-logica.service << 'EOF'
+            [Unit]
+            Description=Servidor de logica votacion
+            After=network.target votacion-datos.service
+
+            [Service]
+            ExecStart=/root/votacionOnline/venv/bin/python3 /root/votacionOnline/logica.py
+            WorkingDirectory=/root/votacionOnline
+            Restart=always
+            RestartSec=3
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            systemctl daemon-reload
+            systemctl enable votacion-datos votacion-logica
+            systemctl restart votacion-datos votacion-logica
             echo "Deploy completado"
